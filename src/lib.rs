@@ -5,8 +5,8 @@ use core::net::Ipv4Addr;
 use core::net::SocketAddr;
 use csv;
 
-use bincode::{deserialize};
-use serde::{Serialize, Deserialize};
+use bincode::deserialize;
+use serde::Deserialize;
 
 fn read_socket() -> std::io::Result<()> {
     let ip_addr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
@@ -38,10 +38,32 @@ struct DataBlock {
     sequence1: ChannelData
 }
 
+#[derive(Deserialize, Debug)]
 struct RawData {
     blocks: [DataBlock; 12],
     timestamp: [u8; 4],
     factory_bytes: [u8; 2]
+}
+
+#[derive(Deserialize, Debug)]
+struct LaserConfig {
+    dist_correction: f64,
+    dist_correction_x: f64,
+    dist_correction_y: f64,
+    focal_distance: f64,
+    focal_slope: f64,
+    horiz_offset_correction: f64,
+    laser_id: u16,
+    rot_correction: f64,
+    vert_correction: f64,
+    vert_offset_correction: f64
+}
+
+#[derive(Deserialize, Debug)]
+struct VLP16Config {
+    lasers: [LaserConfig; 16],
+    num_lasers: u16,
+    distance_resolution: f64
 }
 
 #[cfg(test)]
@@ -131,5 +153,13 @@ mod tests {
         ];
         let foobar: DataBlock = deserialize(&data).unwrap();
         println!("{:0X?}", foobar);
+    }
+
+    #[test]
+    fn test_read_vlp16_yaml() -> Result<(), Box<dyn std::error::Error>>  {
+        let f = std::fs::File::open("VLP16db.yaml")?;
+        let config: VLP16Config = serde_yaml::from_reader(f)?;
+        println!("config = {:?}", config);
+        Ok(())
     }
 }
