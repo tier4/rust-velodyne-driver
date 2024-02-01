@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::fs::File;
 use core::net::IpAddr;
@@ -53,7 +54,7 @@ struct LaserConfig {
     focal_distance: f64,
     focal_slope: f64,
     horiz_offset_correction: f64,
-    laser_id: u16,
+    laser_id: u32,
     rot_correction: f64,
     vert_correction: f64,
     vert_offset_correction: f64
@@ -62,8 +63,28 @@ struct LaserConfig {
 #[derive(Deserialize, Debug)]
 struct VLP16Config {
     lasers: [LaserConfig; 16],
-    num_lasers: u16,
+    num_lasers: u32,
     distance_resolution: f64
+}
+
+fn make_sin_cos_tables(iter: impl Iterator<Item = (u32, f64)>) -> (HashMap<u32, f64>, HashMap<u32, f64>) {
+    let mut sin = HashMap::new();
+    let mut cos = HashMap::new();
+    for (id, angle) in iter {
+        sin.insert(id, f64::sin(angle));
+        cos.insert(id, f64::cos(angle));
+    }
+    (sin, cos)
+}
+
+fn make_rot_tables(lasers: &[LaserConfig]) -> (HashMap<u32, f64>, HashMap<u32, f64>) {
+    let iter = lasers.iter().map(|laser| (laser.laser_id, laser.rot_correction));
+    make_sin_cos_tables(iter)
+}
+
+fn make_vert_tables(lasers: &[LaserConfig]) -> (HashMap<u32, f64>, HashMap<u32, f64>) {
+    let iter = lasers.iter().map(|laser| (laser.laser_id, laser.vert_correction));
+    make_sin_cos_tables(iter)
 }
 
 #[cfg(test)]
@@ -159,7 +180,11 @@ mod tests {
     fn test_read_vlp16_yaml() -> Result<(), Box<dyn std::error::Error>>  {
         let f = std::fs::File::open("VLP16db.yaml")?;
         let config: VLP16Config = serde_yaml::from_reader(f)?;
-        println!("config = {:?}", config);
+        println!("config = {:?}", config.lasers);
+
+        make_vert_tables(&config.lasers);
+        make_rot_tables(&config.lasers);
+
         Ok(())
     }
 }
