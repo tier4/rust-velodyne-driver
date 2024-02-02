@@ -171,40 +171,16 @@ mod tests {
     fn test_parse_packets() -> Result<(), Box<dyn std::error::Error>> {
         let f = std::fs::File::open("VLP16db.yaml")?;
         let config: VLP16Config = serde_yaml::from_reader(f)?;
+        let resolution = config.distance_resolution;
+
         let (vert_sin, vert_cos) = make_vert_tables(&config.lasers);
         let (rot_sin, rot_cos) = make_rot_tables(&config.lasers);
 
         let data: RawData = deserialize(&sample_packet).unwrap();
         for (i, block) in data.blocks.iter().enumerate() {
             let (rotation0, rotation1) = calc_angles(&data.blocks, i);
-            // let calc_points(block.sequence0, rotation0, config.distance_resolution);
-            // let calc_points(block.sequence1, rotation1, config.distance_resolution);
-
-            let cosr0 = f64::cos(rotation0);
-            let sinr0 = f64::sin(rotation0);
-            for (channel, s) in block.sequence0.iter().enumerate() {
-                if s.distance == 0 {
-                    continue;
-                }
-                let distance = (s.distance as f64) * config.distance_resolution;
-
-                let sinv = *vert_sin.get(&channel).unwrap();
-                let cosv = *vert_cos.get(&channel).unwrap();
-                let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr0, cosr0);
-            }
-
-            let cosr1 = f64::cos(rotation1);
-            let sinr1 = f64::sin(rotation1);
-            for (channel, s) in block.sequence1.iter().enumerate() {
-                if s.distance == 0 {
-                    continue;
-                }
-                let distance = (s.distance as f64) * config.distance_resolution;
-
-                let sinv = *vert_sin.get(&channel).unwrap();
-                let cosv = *vert_cos.get(&channel).unwrap();
-                let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr1, cosr1);
-            }
+            calc_points(&vert_sin, &vert_cos, &block.sequence0, rotation0, resolution);
+            calc_points(&vert_sin, &vert_cos, &block.sequence1, rotation1, resolution);
         }
 
         Ok(())
