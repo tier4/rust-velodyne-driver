@@ -14,6 +14,7 @@ mod sample_packet;
 use crate::sample_packet::sample_packet;
 
 const AZIMUTH_TO_DEGREE: f64 = 0.01;
+const PI: f64 = std::f64::consts::PI;
 
 fn read_socket() -> std::io::Result<()> {
     let ip_addr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
@@ -99,6 +100,23 @@ fn make_vert_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usi
     make_sin_cos_tables(iter)
 }
 
+fn calc_points(
+    vert_sin: &HashMap<usize, f64>, vert_cos: &HashMap<usize, f64>,
+    sequence: &[Data], rotation: f64, distance_resolution: f64) {
+    let cosr = f64::cos(rotation);
+    let sinr = f64::sin(rotation);
+    for (channel, s) in sequence.iter().enumerate() {
+        if s.distance == 0 {
+            continue;
+        }
+        let distance = (s.distance as f64) * distance_resolution;
+
+        let sinv = *vert_sin.get(&channel).unwrap();
+        let cosv = *vert_cos.get(&channel).unwrap();
+        let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr, cosr);
+    }
+}
+
 fn calc_xyz(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> (f64, f64, f64) {
     let z = distance * sinv;
     let k = distance * cosv;
@@ -108,30 +126,29 @@ fn calc_xyz(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> (f64, 
 }
 
 fn degree_to_radian(degree: f64) -> f64 {
-    let pi = std::f64::consts::PI;
-    degree * pi / 180.
+    degree * PI / 180.
 }
 
-fn calc_angle_diff(blocks: &[DataBlock], index: usize) -> f64 {
+fn calc_degree_diff(blocks: &[DataBlock], index: usize) -> f64 {
     let n = min(blocks.len() - 2, index);
 
-    let angle0: f64 = (blocks[n+0].azimuth as f64) * AZIMUTH_TO_DEGREE;
-    let angle1: f64 = (blocks[n+1].azimuth as f64) * AZIMUTH_TO_DEGREE;
+    let degree0: f64 = (blocks[n+0].azimuth as f64) * AZIMUTH_TO_DEGREE;
+    let degree1: f64 = (blocks[n+1].azimuth as f64) * AZIMUTH_TO_DEGREE;
 
-    if angle0 <= angle1 {
-        angle1 - angle0
+    if degree0 <= degree1 {
+        degree1 - degree0
     } else {
-        (angle1 + 360.) - angle0
+        (degree1 + 360.) - degree0
     }
 }
 
 fn calc_angles(blocks: &[DataBlock], index: usize) -> (f64, f64) {
-    let angle_diff = calc_angle_diff(blocks, index) as f64;
-    let angle_curr = 0.01 * (blocks[index].azimuth as f64);
-    let angle_next = 0.01 * (angle_curr + 0.5 * angle_diff);
+    let degree_diff = calc_degree_diff(blocks, index);
+    let degree_curr = AZIMUTH_TO_DEGREE * (blocks[index].azimuth as f64);
+    let degree_next = degree_curr + 0.5 * degree_diff;
 
-    let rotation0 = degree_to_radian(angle_curr);
-    let rotation1 = degree_to_radian(angle_next);
+    let rotation0 = degree_to_radian(degree_curr);
+    let rotation1 = degree_to_radian(degree_next);
     (rotation0, rotation1)
 }
 
@@ -160,6 +177,8 @@ mod tests {
         let data: RawData = deserialize(&sample_packet).unwrap();
         for (i, block) in data.blocks.iter().enumerate() {
             let (rotation0, rotation1) = calc_angles(&data.blocks, i);
+            // let calc_points(block.sequence0, rotation0, config.distance_resolution);
+            // let calc_points(block.sequence1, rotation1, config.distance_resolution);
 
             let cosr0 = f64::cos(rotation0);
             let sinr0 = f64::sin(rotation0);
@@ -172,8 +191,6 @@ mod tests {
                 let sinv = *vert_sin.get(&channel).unwrap();
                 let cosv = *vert_cos.get(&channel).unwrap();
                 let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr0, cosr0);
-                println!("distance = {:3.5}", distance);
-                println!("x, y, z = {}, {}, {}", x, y, z);
             }
 
             let cosr1 = f64::cos(rotation1);
@@ -187,8 +204,6 @@ mod tests {
                 let sinv = *vert_sin.get(&channel).unwrap();
                 let cosv = *vert_cos.get(&channel).unwrap();
                 let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr1, cosr1);
-                println!("distance = {:3.5}", distance);
-                println!("x, y, z = {}, {}, {}", x, y, z);
             }
         }
 
@@ -208,9 +223,36 @@ mod tests {
     #[test]
     fn test_calc_angles() {
         let data: RawData = deserialize(&sample_packet).unwrap();
-        println!("angles = {:?}", calc_angles(&data.blocks, 0));
-        for b in data.blocks {
-            println!("b.azimuth = {:?}", b.azimuth);
-        }
+
+        // blocks[ 0].azimuth = 35695
+        // blocks[ 1].azimuth = 35733
+        // blocks[ 2].azimuth = 35773
+        // blocks[ 3].azimuth = 35813
+        // blocks[ 4].azimuth = 35853
+        // blocks[ 5].azimuth = 35891
+        // blocks[ 6].azimuth = 35931
+        // blocks[ 7].azimuth = 35971
+        // blocks[ 8].azimuth = 11
+        // blocks[ 9].azimuth = 49
+        // blocks[10].azimuth = 90
+        // blocks[11].azimuth = 129
+
+        let (rotation0, rotation1) = calc_angles(&data.blocks, 0);
+        let expected0 = PI * 0.01 * 35695. / 180.;
+        let expected1 = PI * 0.01 * (35695. + 0.5 * (35733. - 35695.)) / 180.0;
+        assert!(f64::abs(rotation0 - expected0) < 1e-10);
+        assert!(f64::abs(rotation1 - expected1) < 1e-10);
+
+        let (rotation0, rotation1) = calc_angles(&data.blocks, 7);
+        let expected0 = PI * 0.01 * 35971. / 180.;
+        let expected1 = PI * 0.01 * (35971. + 0.5 * (11. + 36000. - 35971.)) / 180.0;
+        assert!(f64::abs(rotation0 - expected0) < 1e-10);
+        assert!(f64::abs(rotation1 - expected1) < 1e-10);
+
+        let (rotation0, rotation1) = calc_angles(&data.blocks, 11);
+        let expected0 = PI * 0.01 * 129. / 180.;
+        let expected1 = PI * 0.01 * (129. + 0.5 * (129. - 90.)) / 180.0;
+        assert!(f64::abs(rotation0 - expected0) < 1e-10);
+        assert!(f64::abs(rotation1 - expected1) < 1e-10);
     }
 }
