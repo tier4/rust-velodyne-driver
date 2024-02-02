@@ -4,6 +4,7 @@ use std::fs::File;
 use core::net::IpAddr;
 use core::net::Ipv4Addr;
 use core::net::SocketAddr;
+use core::cmp::min;
 use csv;
 
 use bincode::deserialize;
@@ -11,6 +12,8 @@ use serde::Deserialize;
 
 mod sample_packet;
 use crate::sample_packet::sample_packet;
+
+const AZIMUTH_TO_DEGREE: f64 = 0.01;
 
 fn read_socket() -> std::io::Result<()> {
     let ip_addr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
@@ -104,6 +107,34 @@ fn calc_xyz(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> (f64, 
     (x, y, z)
 }
 
+fn degree_to_radian(degree: f64) -> f64 {
+    let pi = std::f64::consts::PI;
+    degree * pi / 180.
+}
+
+fn calc_angle_diff(blocks: &[DataBlock], index: usize) -> f64 {
+    let n = min(blocks.len() - 2, index);
+
+    let angle0: f64 = (blocks[n+0].azimuth as f64) * AZIMUTH_TO_DEGREE;
+    let angle1: f64 = (blocks[n+1].azimuth as f64) * AZIMUTH_TO_DEGREE;
+
+    if angle0 <= angle1 {
+        angle1 - angle0
+    } else {
+        (angle1 + 360.) - angle0
+    }
+}
+
+fn calc_angles(blocks: &[DataBlock], index: usize) -> (f64, f64) {
+    let angle_diff = calc_angle_diff(blocks, index) as f64;
+    let angle_curr = 0.01 * (blocks[index].azimuth as f64);
+    let angle_next = 0.01 * (angle_curr + 0.5 * angle_diff);
+
+    let rotation0 = degree_to_radian(angle_curr);
+    let rotation1 = degree_to_radian(angle_next);
+    (rotation0, rotation1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,32 +158,37 @@ mod tests {
         let (rot_sin, rot_cos) = make_rot_tables(&config.lasers);
 
         let data: RawData = deserialize(&sample_packet).unwrap();
-        for block in data.blocks {
-            let rotation = (block.azimuth as f64) * 0.01;
-            println!("azimuth = {:5}, rotation = {:>3.3}", block.azimuth, rotation);
-            let cosr = f64::cos(rotation);
-            let sinr = f64::sin(rotation);
+        for (i, block) in data.blocks.iter().enumerate() {
+            let (rotation0, rotation1) = calc_angles(&data.blocks, i);
 
+            let cosr0 = f64::cos(rotation0);
+            let sinr0 = f64::sin(rotation0);
             for (channel, s) in block.sequence0.iter().enumerate() {
+                if s.distance == 0 {
+                    continue;
+                }
                 let distance = (s.distance as f64) * config.distance_resolution;
+
                 let sinv = *vert_sin.get(&channel).unwrap();
                 let cosv = *vert_cos.get(&channel).unwrap();
-
-                let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr, cosr);
-                // println!("x, y, z = {}, {}, {}", x, y, z);
-                // println!("distance = {:.3}   intensity = {:5}", distance, s.intensity);
+                let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr0, cosr0);
+                println!("distance = {:3.5}", distance);
+                println!("x, y, z = {}, {}, {}", x, y, z);
             }
 
-            // TODO We need to calculate azimuth for sequence 1 by
-            // interpolation
+            let cosr1 = f64::cos(rotation1);
+            let sinr1 = f64::sin(rotation1);
             for (channel, s) in block.sequence1.iter().enumerate() {
+                if s.distance == 0 {
+                    continue;
+                }
                 let distance = (s.distance as f64) * config.distance_resolution;
+
                 let sinv = *vert_sin.get(&channel).unwrap();
                 let cosv = *vert_cos.get(&channel).unwrap();
-
-                let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr, cosr);
-                // println!("x, y, z = {}, {}, {}", x, y, z);
-                // println!("distance = {:.3}   intensity = {:5}", distance, s.intensity);
+                let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr1, cosr1);
+                println!("distance = {:3.5}", distance);
+                println!("x, y, z = {}, {}, {}", x, y, z);
             }
         }
 
@@ -167,5 +203,14 @@ mod tests {
         make_rot_tables(&config.lasers);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_calc_angles() {
+        let data: RawData = deserialize(&sample_packet).unwrap();
+        println!("angles = {:?}", calc_angles(&data.blocks, 0));
+        for b in data.blocks {
+            println!("b.azimuth = {:?}", b.azimuth);
+        }
     }
 }
