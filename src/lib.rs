@@ -52,6 +52,12 @@ struct VLP16Config {
     distance_resolution: f64,
 }
 
+struct SinCosTables {
+    vert_sin: HashMap<usize, f64>,
+    vert_cos: HashMap<usize, f64>,
+    distance_resolution: f64,
+}
+
 fn make_sin_cos_tables(
     iter: impl Iterator<Item = (usize, f64)>,
 ) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
@@ -62,6 +68,23 @@ fn make_sin_cos_tables(
         cos.insert(id, f64::cos(angle));
     }
     (sin, cos)
+}
+
+impl SinCosTables {
+    fn calc_points(&self, sequence: &[Data], rotation: f64) {
+        let cosr = f64::cos(rotation);
+        let sinr = f64::sin(rotation);
+        for (channel, s) in sequence.iter().enumerate() {
+            if s.distance == 0 {
+                continue;
+            }
+            let distance = (s.distance as f64) * self.distance_resolution;
+
+            let sinv = *(self.vert_sin).get(&channel).unwrap();
+            let cosv = *(self.vert_cos).get(&channel).unwrap();
+            let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr, cosr);
+        }
+    }
 }
 
 fn make_rot_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
@@ -76,27 +99,6 @@ fn make_vert_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usi
         .iter()
         .map(|laser| (laser.laser_id, laser.vert_correction));
     make_sin_cos_tables(iter)
-}
-
-fn calc_points(
-    vert_sin: &HashMap<usize, f64>,
-    vert_cos: &HashMap<usize, f64>,
-    sequence: &[Data],
-    rotation: f64,
-    distance_resolution: f64,
-) {
-    let cosr = f64::cos(rotation);
-    let sinr = f64::sin(rotation);
-    for (channel, s) in sequence.iter().enumerate() {
-        if s.distance == 0 {
-            continue;
-        }
-        let distance = (s.distance as f64) * distance_resolution;
-
-        let sinv = *vert_sin.get(&channel).unwrap();
-        let cosv = *vert_cos.get(&channel).unwrap();
-        let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr, cosr);
-    }
 }
 
 fn calc_xyz(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> (f64, f64, f64) {
@@ -144,28 +146,20 @@ mod tests {
     fn test_parse_packets() -> Result<(), Box<dyn std::error::Error>> {
         let f = std::fs::File::open("VLP16db.yaml")?;
         let config: VLP16Config = serde_yaml::from_reader(f)?;
-        let resolution = config.distance_resolution;
-
         let (vert_sin, vert_cos) = make_vert_tables(&config.lasers);
-        let (rot_sin, rot_cos) = make_rot_tables(&config.lasers);
+        // let (rot_sin, rot_cos) = make_rot_tables(&config.lasers);
+
+        let tables = SinCosTables {
+            vert_sin: vert_sin,
+            vert_cos: vert_cos,
+            distance_resolution: config.distance_resolution,
+        };
 
         let data: RawData = deserialize(&sample_packet).unwrap();
         for (i, block) in data.blocks.iter().enumerate() {
             let (rotation0, rotation1) = calc_angles(&data.blocks, i);
-            calc_points(
-                &vert_sin,
-                &vert_cos,
-                &block.sequence0,
-                rotation0,
-                resolution,
-            );
-            calc_points(
-                &vert_sin,
-                &vert_cos,
-                &block.sequence1,
-                rotation1,
-                resolution,
-            );
+            tables.calc_points(&block.sequence0, rotation0);
+            tables.calc_points(&block.sequence1, rotation1);
         }
 
         Ok(())
