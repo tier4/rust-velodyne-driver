@@ -16,21 +16,7 @@ use crate::sample_packet::sample_packet;
 const AZIMUTH_TO_DEGREE: f64 = 0.01;
 const PI: f64 = std::f64::consts::PI;
 
-fn read_socket() -> std::io::Result<()> {
-    let ip_addr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0));
-    let socket_addr = SocketAddr::new(ip_addr, 2368);
-    let socket = UdpSocket::bind(socket_addr)?;
-
-    loop {
-        let mut buf = [0u8; 1206];
-        let (amount, src) = socket.recv_from(&mut buf)?;
-    }
-
-    Ok(())
-}
-
-
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct Data {
     distance: u16,
     intensity: u8,
@@ -38,7 +24,7 @@ struct Data {
 
 type ChannelData = [Data; 16];
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct DataBlock {
     header: u16,
     azimuth: u16,
@@ -46,14 +32,14 @@ struct DataBlock {
     sequence1: ChannelData
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct RawData {
     blocks: [DataBlock; 12],
     timestamp: [u8; 4],
     factory_bytes: [u8; 2]
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct LaserConfig {
     dist_correction: f64,
     dist_correction_x: f64,
@@ -67,17 +53,11 @@ struct LaserConfig {
     vert_offset_correction: f64
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct VLP16Config {
     lasers: [LaserConfig; 16],
     num_lasers: usize,
     distance_resolution: f64
-}
-
-fn polar_to_cartesian(distance: f64, angle: f64) -> (f64, f64) {
-    let x = distance * f64::cos(angle);
-    let y = distance * f64::sin(angle);
-    (x, y)
 }
 
 fn make_sin_cos_tables(iter: impl Iterator<Item = (usize, f64)>) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
