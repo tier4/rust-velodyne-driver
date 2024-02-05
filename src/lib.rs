@@ -53,6 +53,7 @@ struct VLP16Config {
 }
 
 struct SinCosTables {
+    process_point: fn((f64, f64, f64)) -> (),
     vert_sin: HashMap<usize, f64>,
     vert_cos: HashMap<usize, f64>,
     distance_resolution: f64,
@@ -70,6 +71,14 @@ fn make_sin_cos_tables(
     (sin, cos)
 }
 
+fn calc_point(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> (f64, f64, f64) {
+    let z = distance * sinv;
+    let k = distance * cosv;
+    let x = k * sinr;
+    let y = k * cosr;
+    (x, y, z)
+}
+
 impl SinCosTables {
     fn calc_points(&self, sequence: &[Data], rotation: f64) {
         let cosr = f64::cos(rotation);
@@ -82,7 +91,8 @@ impl SinCosTables {
 
             let sinv = *(self.vert_sin).get(&channel).unwrap();
             let cosv = *(self.vert_cos).get(&channel).unwrap();
-            let (x, y, z) = calc_xyz(distance, sinv, cosv, sinr, cosr);
+            let point = calc_point(distance, sinv, cosv, sinr, cosr);
+            (self.process_point)(point);
         }
     }
 }
@@ -99,14 +109,6 @@ fn make_vert_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usi
         .iter()
         .map(|laser| (laser.laser_id, laser.vert_correction));
     make_sin_cos_tables(iter)
-}
-
-fn calc_xyz(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> (f64, f64, f64) {
-    let z = distance * sinv;
-    let k = distance * cosv;
-    let x = k * sinr;
-    let y = k * cosr;
-    (x, y, z)
 }
 
 fn degree_to_radian(degree: f64) -> f64 {
@@ -142,6 +144,11 @@ mod tests {
     use crate::sample_packet::sample_packet;
     use bincode::deserialize;
 
+    fn print(p: (f64, f64, f64)) {
+        let (x, y, z) = p;
+        println!("{} {} {}", x, y, z);
+    }
+
     #[test]
     fn test_parse_packets() -> Result<(), Box<dyn std::error::Error>> {
         let f = std::fs::File::open("VLP16db.yaml")?;
@@ -150,6 +157,7 @@ mod tests {
         // let (rot_sin, rot_cos) = make_rot_tables(&config.lasers);
 
         let tables = SinCosTables {
+            process_point: print,
             vert_sin: vert_sin,
             vert_cos: vert_cos,
             distance_resolution: config.distance_resolution,
