@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use core::cmp::min;
+use std::collections::HashMap;
 
 use serde::Deserialize;
 
@@ -21,14 +21,14 @@ struct DataBlock {
     header: u16,
     azimuth: u16,
     sequence0: ChannelData,
-    sequence1: ChannelData
+    sequence1: ChannelData,
 }
 
 #[derive(Deserialize)]
 struct RawData {
     blocks: [DataBlock; 12],
     timestamp: [u8; 4],
-    factory_bytes: [u8; 2]
+    factory_bytes: [u8; 2],
 }
 
 #[derive(Deserialize)]
@@ -42,17 +42,19 @@ struct LaserConfig {
     laser_id: usize,
     rot_correction: f64,
     vert_correction: f64,
-    vert_offset_correction: f64
+    vert_offset_correction: f64,
 }
 
 #[derive(Deserialize)]
 struct VLP16Config {
     lasers: [LaserConfig; 16],
     num_lasers: usize,
-    distance_resolution: f64
+    distance_resolution: f64,
 }
 
-fn make_sin_cos_tables(iter: impl Iterator<Item = (usize, f64)>) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
+fn make_sin_cos_tables(
+    iter: impl Iterator<Item = (usize, f64)>,
+) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
     let mut sin = HashMap::new();
     let mut cos = HashMap::new();
     for (id, angle) in iter {
@@ -63,18 +65,26 @@ fn make_sin_cos_tables(iter: impl Iterator<Item = (usize, f64)>) -> (HashMap<usi
 }
 
 fn make_rot_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
-    let iter = lasers.iter().map(|laser| (laser.laser_id, laser.rot_correction));
+    let iter = lasers
+        .iter()
+        .map(|laser| (laser.laser_id, laser.rot_correction));
     make_sin_cos_tables(iter)
 }
 
 fn make_vert_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
-    let iter = lasers.iter().map(|laser| (laser.laser_id, laser.vert_correction));
+    let iter = lasers
+        .iter()
+        .map(|laser| (laser.laser_id, laser.vert_correction));
     make_sin_cos_tables(iter)
 }
 
 fn calc_points(
-    vert_sin: &HashMap<usize, f64>, vert_cos: &HashMap<usize, f64>,
-    sequence: &[Data], rotation: f64, distance_resolution: f64) {
+    vert_sin: &HashMap<usize, f64>,
+    vert_cos: &HashMap<usize, f64>,
+    sequence: &[Data],
+    rotation: f64,
+    distance_resolution: f64,
+) {
     let cosr = f64::cos(rotation);
     let sinr = f64::sin(rotation);
     for (channel, s) in sequence.iter().enumerate() {
@@ -104,8 +114,8 @@ fn degree_to_radian(degree: f64) -> f64 {
 fn calc_degree_diff(blocks: &[DataBlock], index: usize) -> f64 {
     let n = min(blocks.len() - 2, index);
 
-    let degree0: f64 = (blocks[n+0].azimuth as f64) * AZIMUTH_TO_DEGREE;
-    let degree1: f64 = (blocks[n+1].azimuth as f64) * AZIMUTH_TO_DEGREE;
+    let degree0: f64 = (blocks[n + 0].azimuth as f64) * AZIMUTH_TO_DEGREE;
+    let degree1: f64 = (blocks[n + 1].azimuth as f64) * AZIMUTH_TO_DEGREE;
 
     if degree0 <= degree1 {
         degree1 - degree0
@@ -127,8 +137,8 @@ fn calc_angles(blocks: &[DataBlock], index: usize) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bincode::deserialize;
     use crate::sample_packet::sample_packet;
+    use bincode::deserialize;
 
     #[test]
     fn test_parse_packets() -> Result<(), Box<dyn std::error::Error>> {
@@ -142,15 +152,27 @@ mod tests {
         let data: RawData = deserialize(&sample_packet).unwrap();
         for (i, block) in data.blocks.iter().enumerate() {
             let (rotation0, rotation1) = calc_angles(&data.blocks, i);
-            calc_points(&vert_sin, &vert_cos, &block.sequence0, rotation0, resolution);
-            calc_points(&vert_sin, &vert_cos, &block.sequence1, rotation1, resolution);
+            calc_points(
+                &vert_sin,
+                &vert_cos,
+                &block.sequence0,
+                rotation0,
+                resolution,
+            );
+            calc_points(
+                &vert_sin,
+                &vert_cos,
+                &block.sequence1,
+                rotation1,
+                resolution,
+            );
         }
 
         Ok(())
     }
 
     #[test]
-    fn test_read_vlp16_yaml() -> Result<(), Box<dyn std::error::Error>>  {
+    fn test_read_vlp16_yaml() -> Result<(), Box<dyn std::error::Error>> {
         let f = std::fs::File::open("VLP16db.yaml")?;
         let config: VLP16Config = serde_yaml::from_reader(f)?;
         make_vert_tables(&config.lasers);
