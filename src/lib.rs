@@ -1,17 +1,9 @@
 use std::collections::HashMap;
-use std::net::UdpSocket;
-use std::fs::File;
-use core::net::IpAddr;
-use core::net::Ipv4Addr;
-use core::net::SocketAddr;
 use core::cmp::min;
-use csv;
 
-use bincode::deserialize;
 use serde::Deserialize;
 
 mod sample_packet;
-use crate::sample_packet::sample_packet;
 
 const AZIMUTH_TO_DEGREE: f64 = 0.01;
 const PI: f64 = std::f64::consts::PI;
@@ -135,17 +127,8 @@ fn calc_angles(blocks: &[DataBlock], index: usize) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_read_record() -> std::io::Result<()> {
-        let file = File::open("scans/velodyne1.csv")?;
-
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(false)
-            .from_reader(file);
-
-        Ok(())
-    }
+    use bincode::deserialize;
+    use crate::sample_packet::sample_packet;
 
     #[test]
     fn test_parse_packets() -> Result<(), Box<dyn std::error::Error>> {
