@@ -5,11 +5,13 @@ use serde::Deserialize;
 
 mod sample_packet;
 
+pub use crate::sample_packet::SAMPLE_PACKET;
+
 const AZIMUTH_TO_DEGREE: f64 = 0.01;
 const PI: f64 = std::f64::consts::PI;
 
 #[derive(Deserialize)]
-struct Data {
+pub struct Data {
     distance: u16,
     intensity: u8,
 }
@@ -17,46 +19,51 @@ struct Data {
 type ChannelData = [Data; 16];
 
 #[derive(Deserialize)]
-struct DataBlock {
-    header: u16,
-    azimuth: u16,
-    sequence0: ChannelData,
-    sequence1: ChannelData,
+pub struct DataBlock {
+    pub header: u16,
+    pub azimuth: u16,
+    pub sequence0: ChannelData,
+    pub sequence1: ChannelData,
 }
 
 #[derive(Deserialize)]
-struct RawData {
-    blocks: [DataBlock; 12],
-    timestamp: [u8; 4],
-    factory_bytes: [u8; 2],
+pub struct RawData {
+    pub blocks: [DataBlock; 12],
+    pub timestamp: [u8; 4],
+    pub factory_bytes: [u8; 2],
 }
 
 #[derive(Deserialize)]
-struct LaserConfig {
-    dist_correction: f64,
-    dist_correction_x: f64,
-    dist_correction_y: f64,
-    focal_distance: f64,
-    focal_slope: f64,
-    horiz_offset_correction: f64,
-    laser_id: usize,
-    rot_correction: f64,
-    vert_correction: f64,
-    vert_offset_correction: f64,
+pub struct LaserConfig {
+    pub dist_correction: f64,
+    pub dist_correction_x: f64,
+    pub dist_correction_y: f64,
+    pub focal_distance: f64,
+    pub focal_slope: f64,
+    pub horiz_offset_correction: f64,
+    pub laser_id: usize,
+    pub rot_correction: f64,
+    pub vert_correction: f64,
+    pub vert_offset_correction: f64,
 }
 
 #[derive(Deserialize)]
-struct VLP16Config {
-    lasers: [LaserConfig; 16],
-    num_lasers: usize,
-    distance_resolution: f64,
+pub struct VLP16Config {
+    pub lasers: [LaserConfig; 16],
+    pub num_lasers: usize,
+    pub distance_resolution: f64,
 }
 
-struct SinCosTables {
-    process_point: fn((f64, f64, f64)) -> (),
-    vert_sin: HashMap<usize, f64>,
-    vert_cos: HashMap<usize, f64>,
-    distance_resolution: f64,
+pub type Point = (f64, f64, f64);
+
+pub trait PointProcessor {
+    fn process(&mut self, point: &Point);
+}
+
+pub struct SinCosTables {
+    pub vert_sin: HashMap<usize, f64>,
+    pub vert_cos: HashMap<usize, f64>,
+    pub distance_resolution: f64,
 }
 
 fn make_sin_cos_tables(
@@ -71,7 +78,7 @@ fn make_sin_cos_tables(
     (sin, cos)
 }
 
-fn calc_point(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> (f64, f64, f64) {
+fn calc_point(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> Point {
     let z = distance * sinv;
     let k = distance * cosv;
     let x = k * sinr;
@@ -80,7 +87,12 @@ fn calc_point(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> (f64
 }
 
 impl SinCosTables {
-    fn calc_points(&self, sequence: &[Data], rotation: f64) {
+    pub fn calc_points<T: PointProcessor>(
+        &self,
+        point_processor: &mut T,
+        sequence: &[Data],
+        rotation: f64,
+    ) {
         let cosr = f64::cos(rotation);
         let sinr = f64::sin(rotation);
         for (channel, s) in sequence.iter().enumerate() {
@@ -92,7 +104,7 @@ impl SinCosTables {
             let sinv = *(self.vert_sin).get(&channel).unwrap();
             let cosv = *(self.vert_cos).get(&channel).unwrap();
             let point = calc_point(distance, sinv, cosv, sinr, cosr);
-            (self.process_point)(point);
+            point_processor.process(&point);
         }
     }
 }
@@ -104,7 +116,7 @@ fn make_rot_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usiz
     make_sin_cos_tables(iter)
 }
 
-fn make_vert_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
+pub fn make_vert_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
     let iter = lasers
         .iter()
         .map(|laser| (laser.laser_id, laser.vert_correction));
@@ -128,7 +140,7 @@ fn calc_degree_diff(blocks: &[DataBlock], index: usize) -> f64 {
     }
 }
 
-fn calc_angles(blocks: &[DataBlock], index: usize) -> (f64, f64) {
+pub fn calc_angles(blocks: &[DataBlock], index: usize) -> (f64, f64) {
     let degree_diff = calc_degree_diff(blocks, index);
     let degree_curr = AZIMUTH_TO_DEGREE * (blocks[index].azimuth as f64);
     let degree_next = degree_curr + 0.5 * degree_diff;
@@ -144,7 +156,7 @@ mod tests {
     use crate::sample_packet::sample_packet;
     use bincode::deserialize;
 
-    fn print(p: (f64, f64, f64)) {
+    fn print(p: &Point) {
         let (x, y, z) = p;
         println!("{} {} {}", x, y, z);
     }
