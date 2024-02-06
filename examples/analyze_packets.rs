@@ -11,7 +11,8 @@ use csv::Writer;
 
 use velodyne_driver;
 use velodyne_driver::{
-    calc_angles, make_vert_tables, Point, PointProcessor, RawData, SinCosTables, VLP16Config,
+    calc_angles, make_vert_tables, Point, PointProcessor, RawData, RotationCalculator,
+    SinCosTables, VLP16Config,
 };
 
 struct CSVWriter {
@@ -50,18 +51,27 @@ fn main() -> Result<(), std::io::Error> {
     };
 
     let socket = make_socket()?;
-    for i in 0..100 {
-        println!("i = {i:03}");
+    for i in 0..720 {
         let mut writer = CSVWriter::from_path(format!("points/points{:03}.csv", i)).unwrap();
 
         let mut buf = [0u8; 1206];
         socket.recv_from(&mut buf)?;
 
         let data: RawData = deserialize(&buf).unwrap();
-        for (j, block) in data.blocks.iter().enumerate() {
-            let (rotation0, rotation1) = calc_angles(&data.blocks, j);
-            tables.calc_points(&mut writer, &block.sequence0, rotation0);
-            tables.calc_points(&mut writer, &block.sequence1, rotation1);
+        for (block_index, block) in data.blocks.iter().enumerate() {
+            let (radian0, radian1) = calc_angles(&data.blocks, block_index);
+            let r0 = RotationCalculator {
+                radian0,
+                radian1,
+                sequence_index: 0,
+            };
+            let r1 = RotationCalculator {
+                radian0,
+                radian1,
+                sequence_index: 1,
+            };
+            tables.calc_points(&mut writer, &r0, &block.sequence0);
+            tables.calc_points(&mut writer, &r1, &block.sequence1);
         }
     }
 

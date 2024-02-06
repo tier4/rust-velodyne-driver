@@ -86,16 +86,34 @@ fn calc_point(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> Poin
     (x, y, z)
 }
 
+pub struct RotationCalculator {
+    pub radian0: f64,
+    pub radian1: f64,
+    pub sequence_index: usize,
+}
+
+const FIRING_INTERVAL: f64 = 2.304; // [micro second]
+const OFFSET_TIME: f64 = 55.296; // [micro second]
+impl RotationCalculator {
+    fn at(&self, channel: usize) -> f64 {
+        let d = self.radian1 - self.radian0;
+        let offset = OFFSET_TIME * (self.sequence_index as f64);
+        let t = FIRING_INTERVAL * (channel as f64);
+        self.radian0 + d * (offset + t) / (OFFSET_TIME * 2.)
+    }
+}
+
 impl SinCosTables {
     pub fn calc_points<T: PointProcessor>(
         &self,
         point_processor: &mut T,
+        rotation: &RotationCalculator,
         sequence: &[Data],
-        rotation: f64,
     ) {
-        let cosr = f64::cos(rotation);
-        let sinr = f64::sin(rotation);
         for (channel, s) in sequence.iter().enumerate() {
+            let r = rotation.at(channel);
+            let cosr = f64::cos(r);
+            let sinr = f64::sin(r);
             if s.distance == 0 {
                 continue;
             }
@@ -142,47 +160,117 @@ fn calc_degree_diff(blocks: &[DataBlock], index: usize) -> f64 {
 
 pub fn calc_angles(blocks: &[DataBlock], index: usize) -> (f64, f64) {
     let degree_diff = calc_degree_diff(blocks, index);
-    let degree_curr = AZIMUTH_TO_DEGREE * (blocks[index].azimuth as f64);
-    let degree_next = degree_curr + 0.5 * degree_diff;
+    let degree0 = AZIMUTH_TO_DEGREE * (blocks[index].azimuth as f64);
+    let degree1 = degree0 + degree_diff;
 
-    let rotation0 = degree_to_radian(degree_curr);
-    let rotation1 = degree_to_radian(degree_next);
-    (rotation0, rotation1)
+    let radian0 = degree_to_radian(degree0);
+    let radian1 = degree_to_radian(degree1);
+    (radian0, radian1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sample_packet::sample_packet;
+    use crate::sample_packet::SAMPLE_PACKET;
     use bincode::deserialize;
 
-    fn print(p: &Point) {
-        let (x, y, z) = p;
-        println!("{} {} {}", x, y, z);
-    }
-
     #[test]
-    fn test_parse_packets() -> Result<(), Box<dyn std::error::Error>> {
-        let f = std::fs::File::open("VLP16db.yaml")?;
-        let config: VLP16Config = serde_yaml::from_reader(f)?;
-        let (vert_sin, vert_cos) = make_vert_tables(&config.lasers);
-        // let (rot_sin, rot_cos) = make_rot_tables(&config.lasers);
+    fn test_rotation_calculator() {
+        let data: RawData = deserialize(&SAMPLE_PACKET).unwrap();
 
-        let tables = SinCosTables {
-            process_point: print,
-            vert_sin: vert_sin,
-            vert_cos: vert_cos,
-            distance_resolution: config.distance_resolution,
-        };
+        // blocks[ 0].azimuth = 35695
+        // blocks[ 1].azimuth = 35733
+        // blocks[ 2].azimuth = 35773
+        // blocks[ 3].azimuth = 35813
+        // blocks[ 4].azimuth = 35853
+        // blocks[ 5].azimuth = 35891
+        // blocks[ 6].azimuth = 35931
+        // blocks[ 7].azimuth = 35971
+        // blocks[ 8].azimuth = 11
+        // blocks[ 9].azimuth = 49
+        // blocks[10].azimuth = 90
+        // blocks[11].azimuth = 129
 
-        let data: RawData = deserialize(&sample_packet).unwrap();
-        for (i, block) in data.blocks.iter().enumerate() {
-            let (rotation0, rotation1) = calc_angles(&data.blocks, i);
-            tables.calc_points(&block.sequence0, rotation0);
-            tables.calc_points(&block.sequence1, rotation1);
+        {
+            let block_index = 0;
+            let channel = 4;
+            let (radian0, radian1) = calc_angles(&data.blocks, block_index);
+
+            let r0 = RotationCalculator {
+                radian0,
+                radian1,
+                sequence_index: 0,
+            };
+            let r1 = RotationCalculator {
+                radian0,
+                radian1,
+                sequence_index: 1,
+            };
+
+            let firinig_time = FIRING_INTERVAL * (channel as f64);
+            let t: f64 = 35695. * AZIMUTH_TO_DEGREE;
+            let dt: f64 = (35733. - 35695.) * AZIMUTH_TO_DEGREE;
+
+            let e0 = t + dt * firinig_time / (OFFSET_TIME * 2.);
+            let e1 = t + dt * (OFFSET_TIME + firinig_time) / (OFFSET_TIME * 2.);
+
+            assert!(f64::abs(r0.at(channel) - degree_to_radian(e0)) < 1e-10);
+            assert!(f64::abs(r1.at(channel) - degree_to_radian(e1)) < 1e-10);
         }
 
-        Ok(())
+        {
+            let block_index = 7;
+            let channel = 8;
+            let (radian0, radian1) = calc_angles(&data.blocks, block_index);
+
+            let r0 = RotationCalculator {
+                radian0,
+                radian1,
+                sequence_index: 0,
+            };
+            let r1 = RotationCalculator {
+                radian0,
+                radian1,
+                sequence_index: 1,
+            };
+
+            let firinig_time = FIRING_INTERVAL * (channel as f64);
+            let t: f64 = 35971. * AZIMUTH_TO_DEGREE;
+            let dt: f64 = (36000. + 11. - 35971.) * AZIMUTH_TO_DEGREE;
+
+            let e0 = t + dt * firinig_time / (OFFSET_TIME * 2.);
+            let e1 = t + dt * (OFFSET_TIME + firinig_time) / (OFFSET_TIME * 2.);
+
+            assert!(f64::abs(r0.at(channel) - degree_to_radian(e0)) < 1e-10);
+            assert!(f64::abs(r1.at(channel) - degree_to_radian(e1)) < 1e-10);
+        }
+
+        {
+            let block_index = 11;
+            let channel = 5;
+            let (radian0, radian1) = calc_angles(&data.blocks, block_index);
+
+            let r0 = RotationCalculator {
+                radian0,
+                radian1,
+                sequence_index: 0,
+            };
+            let r1 = RotationCalculator {
+                radian0,
+                radian1,
+                sequence_index: 1,
+            };
+
+            let firinig_time = FIRING_INTERVAL * (channel as f64);
+            let t: f64 = 129. * AZIMUTH_TO_DEGREE;
+            let dt: f64 = (129. - 90.) * AZIMUTH_TO_DEGREE;
+
+            let e0 = t + dt * firinig_time / (OFFSET_TIME * 2.);
+            let e1 = t + dt * (OFFSET_TIME + firinig_time) / (OFFSET_TIME * 2.);
+
+            assert!(f64::abs(r0.at(channel) - degree_to_radian(e0)) < 1e-10);
+            assert!(f64::abs(r1.at(channel) - degree_to_radian(e1)) < 1e-10);
+        }
     }
 
     #[test]
@@ -197,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_calc_angles() {
-        let data: RawData = deserialize(&sample_packet).unwrap();
+        let data: RawData = deserialize(&SAMPLE_PACKET).unwrap();
 
         // blocks[ 0].azimuth = 35695
         // blocks[ 1].azimuth = 35733
@@ -214,19 +302,19 @@ mod tests {
 
         let (rotation0, rotation1) = calc_angles(&data.blocks, 0);
         let expected0 = PI * 0.01 * 35695. / 180.;
-        let expected1 = PI * 0.01 * (35695. + 0.5 * (35733. - 35695.)) / 180.0;
+        let expected1 = PI * 0.01 * 35733. / 180.0;
         assert!(f64::abs(rotation0 - expected0) < 1e-10);
         assert!(f64::abs(rotation1 - expected1) < 1e-10);
 
         let (rotation0, rotation1) = calc_angles(&data.blocks, 7);
         let expected0 = PI * 0.01 * 35971. / 180.;
-        let expected1 = PI * 0.01 * (35971. + 0.5 * (11. + 36000. - 35971.)) / 180.0;
+        let expected1 = PI * 0.01 * (35971. + 11. + (36000. - 35971.)) / 180.0;
         assert!(f64::abs(rotation0 - expected0) < 1e-10);
         assert!(f64::abs(rotation1 - expected1) < 1e-10);
 
         let (rotation0, rotation1) = calc_angles(&data.blocks, 11);
         let expected0 = PI * 0.01 * 129. / 180.;
-        let expected1 = PI * 0.01 * (129. + 0.5 * (129. - 90.)) / 180.0;
+        let expected1 = PI * 0.01 * (129. + (129. - 90.)) / 180.0;
         assert!(f64::abs(rotation0 - expected0) < 1e-10);
         assert!(f64::abs(rotation1 - expected1) < 1e-10);
     }
