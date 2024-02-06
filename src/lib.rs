@@ -12,8 +12,8 @@ const PI: f64 = std::f64::consts::PI;
 
 #[derive(Deserialize)]
 pub struct Data {
-    distance: u16,
-    intensity: u8,
+    pub distance: u16,
+    pub intensity: u8,
 }
 
 type ChannelData = [Data; 16];
@@ -57,84 +57,102 @@ pub struct VLP16Config {
 pub type Point = (f64, f64, f64);
 
 pub trait PointProcessor {
-    fn process(&mut self, point: &Point);
+    fn process(&mut self, channel: usize, point: &Point);
 }
 
 pub struct SinCosTables {
-    pub vert_sin: HashMap<usize, f64>,
-    pub vert_cos: HashMap<usize, f64>,
-    pub distance_resolution: f64,
+    pub sin: HashMap<usize, f64>,
+    pub cos: HashMap<usize, f64>,
 }
 
-fn make_sin_cos_tables(
-    iter: impl Iterator<Item = (usize, f64)>,
-) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
+fn make_sin_cos_tables(iter: impl Iterator<Item = (usize, f64)>) -> SinCosTables {
     let mut sin = HashMap::new();
     let mut cos = HashMap::new();
     for (id, angle) in iter {
         sin.insert(id, f64::sin(angle));
         cos.insert(id, f64::cos(angle));
     }
-    (sin, cos)
-}
-
-fn calc_point(distance: f64, sinv: f64, cosv: f64, sinr: f64, cosr: f64) -> Point {
-    let z = distance * sinv;
-    let k = distance * cosv;
-    let x = k * sinr;
-    let y = k * cosr;
-    (x, y, z)
+    SinCosTables { sin, cos }
 }
 
 pub struct RotationCalculator {
     pub radian0: f64,
     pub radian1: f64,
-    pub sequence_index: usize,
 }
 
+const CHANNELS_PER_SEQUENCE: usize = 16;
 const FIRING_INTERVAL: f64 = 2.304; // [micro second]
 const OFFSET_TIME: f64 = 55.296; // [micro second]
 impl RotationCalculator {
-    fn at(&self, channel: usize) -> f64 {
+    fn at(&self, sequence_index: usize, channel: usize) -> f64 {
         let d = self.radian1 - self.radian0;
-        let offset = OFFSET_TIME * (self.sequence_index as f64);
+        let offset = OFFSET_TIME * (sequence_index as f64);
         let t = FIRING_INTERVAL * (channel as f64);
         self.radian0 + d * (offset + t) / (OFFSET_TIME * 2.)
+    }
+
+    pub fn get(&self, sequence_index: usize) -> [f64; 16] {
+        let mut rotations = [0.; 16];
+        for c in 0..CHANNELS_PER_SEQUENCE {
+            rotations[c] = self.at(sequence_index, c);
+        }
+        rotations
     }
 }
 
 impl SinCosTables {
-    pub fn calc_points<T: PointProcessor>(
-        &self,
-        point_processor: &mut T,
-        rotation: &RotationCalculator,
-        sequence: &[Data],
-    ) {
-        for (channel, s) in sequence.iter().enumerate() {
-            let r = rotation.at(channel);
-            let cosr = f64::cos(r);
-            let sinr = f64::sin(r);
-            if s.distance == 0 {
-                continue;
-            }
-            let distance = (s.distance as f64) * self.distance_resolution;
+    fn get(&self, channel: usize) -> (f64, f64) {
+        let sin = *(self.sin).get(&channel).unwrap();
+        let cos = *(self.cos).get(&channel).unwrap();
+        (sin, cos)
+    }
 
-            let sinv = *(self.vert_sin).get(&channel).unwrap();
-            let cosv = *(self.vert_cos).get(&channel).unwrap();
-            let point = calc_point(distance, sinv, cosv, sinr, cosr);
-            point_processor.process(&point);
-        }
+    fn project(&self, channel: usize, distance: f64) -> (f64, f64) {
+        let (sin, cos) = self.get(channel);
+        (distance * sin, distance * cos)
     }
 }
 
-fn make_rot_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
+pub struct DistanceCalculator {
+    pub resolution: f64,
+}
+
+impl DistanceCalculator {
+    fn calculate(&self, distance: u16) -> f64 {
+        (distance as f64) * self.resolution
+    }
+}
+
+fn polar_to_cartesian(distance: f64, radian: f64) -> (f64, f64) {
+    (distance * f64::cos(radian), distance * f64::sin(radian))
+}
+
+pub fn calc_points<T: PointProcessor>(
+    point_processor: &mut T,
+    sin_cos_table: &SinCosTables,
+    distances: &[f64],
+    rotations: &[f64],
+) {
+    assert_eq!(distances.len(), rotations.len());
+    for (channel, (distance, radian)) in distances.iter().zip(rotations.iter()).enumerate() {
+        if *distance == 0. {
+            continue;
+        }
+        let (z, xy_distance) = sin_cos_table.project(channel, *distance);
+        let x = xy_distance * f64::sin(*radian);
+        let y = xy_distance * f64::cos(*radian);
+        point_processor.process(channel, &(x, y, z));
+    }
+}
+
+fn make_rot_tables(lasers: &[LaserConfig]) -> SinCosTables {
     let iter = lasers
         .iter()
         .map(|laser| (laser.laser_id, laser.rot_correction));
     make_sin_cos_tables(iter)
 }
 
-pub fn make_vert_tables(lasers: &[LaserConfig]) -> (HashMap<usize, f64>, HashMap<usize, f64>) {
+pub fn make_vert_tables(lasers: &[LaserConfig]) -> SinCosTables {
     let iter = lasers
         .iter()
         .map(|laser| (laser.laser_id, laser.vert_correction));
@@ -196,16 +214,7 @@ mod tests {
             let channel = 4;
             let (radian0, radian1) = calc_angles(&data.blocks, block_index);
 
-            let r0 = RotationCalculator {
-                radian0,
-                radian1,
-                sequence_index: 0,
-            };
-            let r1 = RotationCalculator {
-                radian0,
-                radian1,
-                sequence_index: 1,
-            };
+            let r = RotationCalculator { radian0, radian1 };
 
             let firinig_time = FIRING_INTERVAL * (channel as f64);
             let t: f64 = 35695. * AZIMUTH_TO_DEGREE;
@@ -214,8 +223,8 @@ mod tests {
             let e0 = t + dt * firinig_time / (OFFSET_TIME * 2.);
             let e1 = t + dt * (OFFSET_TIME + firinig_time) / (OFFSET_TIME * 2.);
 
-            assert!(f64::abs(r0.at(channel) - degree_to_radian(e0)) < 1e-10);
-            assert!(f64::abs(r1.at(channel) - degree_to_radian(e1)) < 1e-10);
+            assert!(f64::abs(r.at(0, channel) - degree_to_radian(e0)) < 1e-10);
+            assert!(f64::abs(r.at(1, channel) - degree_to_radian(e1)) < 1e-10);
         }
 
         {
@@ -223,16 +232,7 @@ mod tests {
             let channel = 8;
             let (radian0, radian1) = calc_angles(&data.blocks, block_index);
 
-            let r0 = RotationCalculator {
-                radian0,
-                radian1,
-                sequence_index: 0,
-            };
-            let r1 = RotationCalculator {
-                radian0,
-                radian1,
-                sequence_index: 1,
-            };
+            let r = RotationCalculator { radian0, radian1 };
 
             let firinig_time = FIRING_INTERVAL * (channel as f64);
             let t: f64 = 35971. * AZIMUTH_TO_DEGREE;
@@ -241,8 +241,8 @@ mod tests {
             let e0 = t + dt * firinig_time / (OFFSET_TIME * 2.);
             let e1 = t + dt * (OFFSET_TIME + firinig_time) / (OFFSET_TIME * 2.);
 
-            assert!(f64::abs(r0.at(channel) - degree_to_radian(e0)) < 1e-10);
-            assert!(f64::abs(r1.at(channel) - degree_to_radian(e1)) < 1e-10);
+            assert!(f64::abs(r.at(0, channel) - degree_to_radian(e0)) < 1e-10);
+            assert!(f64::abs(r.at(1, channel) - degree_to_radian(e1)) < 1e-10);
         }
 
         {
@@ -250,16 +250,7 @@ mod tests {
             let channel = 5;
             let (radian0, radian1) = calc_angles(&data.blocks, block_index);
 
-            let r0 = RotationCalculator {
-                radian0,
-                radian1,
-                sequence_index: 0,
-            };
-            let r1 = RotationCalculator {
-                radian0,
-                radian1,
-                sequence_index: 1,
-            };
+            let r = RotationCalculator { radian0, radian1 };
 
             let firinig_time = FIRING_INTERVAL * (channel as f64);
             let t: f64 = 129. * AZIMUTH_TO_DEGREE;
@@ -268,8 +259,8 @@ mod tests {
             let e0 = t + dt * firinig_time / (OFFSET_TIME * 2.);
             let e1 = t + dt * (OFFSET_TIME + firinig_time) / (OFFSET_TIME * 2.);
 
-            assert!(f64::abs(r0.at(channel) - degree_to_radian(e0)) < 1e-10);
-            assert!(f64::abs(r1.at(channel) - degree_to_radian(e1)) < 1e-10);
+            assert!(f64::abs(r.at(0, channel) - degree_to_radian(e0)) < 1e-10);
+            assert!(f64::abs(r.at(1, channel) - degree_to_radian(e1)) < 1e-10);
         }
     }
 
@@ -279,6 +270,73 @@ mod tests {
         let config: VLP16Config = serde_yaml::from_reader(f)?;
         make_vert_tables(&config.lasers);
         make_rot_tables(&config.lasers);
+
+        Ok(())
+    }
+
+    struct PointAccumulator {
+        pub points: [Option<Point>; CHANNELS_PER_SEQUENCE],
+    }
+
+    impl PointAccumulator {
+        fn new() -> Self {
+            PointAccumulator {
+                points: [None; CHANNELS_PER_SEQUENCE],
+            }
+        }
+    }
+
+    impl PointProcessor for PointAccumulator {
+        fn process(&mut self, channel: usize, p: &Point) {
+            self.points[channel] = Some(*p);
+        }
+    }
+
+    #[test]
+    fn test_calc_points() -> Result<(), Box<dyn std::error::Error>> {
+        let f = std::fs::File::open("VLP16db.yaml")?;
+        let config: VLP16Config = serde_yaml::from_reader(f)?;
+
+        let data: RawData = deserialize(&SAMPLE_PACKET).unwrap();
+
+        let sin_cos_table = make_vert_tables(&config.lasers);
+
+        let mut point_accumulator = PointAccumulator::new();
+
+        let rotations = [
+            0.10, 0.32, 0.54, 0.76, 0.98, 1.20, 1.42, 1.64, 1.86, 2.08, 2.30, 2.52, 2.74, 2.96,
+            3.18, 3.40,
+        ];
+
+        let distances = [
+            0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.0, // distance 0.0 will be skipped
+            1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7,
+        ];
+
+        calc_points(
+            &mut point_accumulator,
+            &sin_cos_table,
+            &distances,
+            &rotations,
+        );
+
+        for (c, point) in point_accumulator.points.iter().enumerate() {
+            let Some((x, y, z)) = point else {
+                assert_eq!(c, 7); // only seventh element should be skipped
+                continue;
+            };
+            assert_ne!(c, 7); // only seventh element should be skipped
+
+            let distance = distances[c];
+            let (sinv, cosv) = sin_cos_table.get(c);
+            let x_expected = distance * cosv * f64::sin(rotations[c]);
+            let y_expected = distance * cosv * f64::cos(rotations[c]);
+            let z_expected = distance * sinv;
+
+            assert!(f64::abs(x - x_expected) < 1e-10);
+            assert!(f64::abs(y - y_expected) < 1e-10);
+            assert!(f64::abs(z - z_expected) < 1e-10);
+        }
 
         Ok(())
     }
