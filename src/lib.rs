@@ -6,6 +6,7 @@ use serde::Deserialize;
 mod sample_packet;
 
 pub use crate::sample_packet::SAMPLE_PACKET;
+use bincode::deserialize;
 
 const AZIMUTH_TO_DEGREE: f64 = 0.01;
 const PI: f64 = std::f64::consts::PI;
@@ -162,6 +163,23 @@ fn calc_degree_diff(blocks: &[DataBlock], index: usize) -> f64 {
     }
 }
 
+pub struct DistanceCalculator {
+    pub resolution: f64,
+}
+
+impl DistanceCalculator {
+    pub fn new(resolution: f64) -> Self {
+        DistanceCalculator { resolution }
+    }
+
+    pub fn calculate(&self, sequence: &[Data]) -> Vec<f64> {
+        sequence
+            .iter()
+            .map(|s: &Data| (s.distance as f64) * self.resolution)
+            .collect::<Vec<f64>>()
+    }
+}
+
 pub fn rotation_calculator_new(blocks: &[DataBlock], index: usize) -> RotationCalculator {
     let degree_diff = calc_degree_diff(blocks, index);
     let degree0 = AZIMUTH_TO_DEGREE * (blocks[index].azimuth as f64);
@@ -172,11 +190,82 @@ pub fn rotation_calculator_new(blocks: &[DataBlock], index: usize) -> RotationCa
     RotationCalculator { radian0, radian1 }
 }
 
+pub struct PointCloudCalculator {
+    distance: DistanceCalculator,
+    tables: SinCosTables,
+}
+
+impl PointCloudCalculator {
+    pub fn new(config: &VLP16Config) -> Self {
+        let distance = DistanceCalculator::new(config.distance_resolution);
+        let tables = make_vert_tables(&config.lasers);
+        PointCloudCalculator { distance, tables }
+    }
+
+    pub fn calculate<T: PointProcessor>(&self, point_processor: &mut T, bytes: &[u8; 1206]) {
+        let data: RawData = deserialize(bytes).unwrap();
+        for (block_index, block) in data.blocks.iter().enumerate() {
+            let r = rotation_calculator_new(&data.blocks, block_index);
+            let rotations0 = r.get(0);
+            let rotations1 = r.get(1);
+            let distances0 = self.distance.calculate(&block.sequence0);
+            let distances1 = self.distance.calculate(&block.sequence1);
+
+            calc_points(point_processor, &self.tables, &distances0, &rotations0);
+            calc_points(point_processor, &self.tables, &distances1, &rotations1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sample_packet::SAMPLE_PACKET;
-    use bincode::deserialize;
+
+    #[test]
+    fn test_distance_calculator() {
+        let data: RawData = deserialize(&SAMPLE_PACKET).unwrap();
+
+        // sequence[ 0].distance = 393
+        // sequence[ 1].distance = 699
+        // sequence[ 2].distance = 438
+        // sequence[ 3].distance = 721
+        // sequence[ 4].distance = 514
+        // sequence[ 5].distance = 731
+        // sequence[ 6].distance = 581
+        // sequence[ 7].distance = 744
+        // sequence[ 8].distance = 574
+        // sequence[ 9].distance = 769
+        // sequence[10].distance = 585
+        // sequence[11].distance = 1140
+        // sequence[12].distance = 678
+        // sequence[13].distance = 1149
+        // sequence[14].distance = 719
+        // sequence[15].distance = 1166
+
+        let d = DistanceCalculator::new(0.5);
+        let result = d.calculate(&data.blocks[0].sequence0);
+        let expected = [
+            0.5 * 393.,
+            0.5 * 699.,
+            0.5 * 438.,
+            0.5 * 721.,
+            0.5 * 514.,
+            0.5 * 731.,
+            0.5 * 581.,
+            0.5 * 744.,
+            0.5 * 574.,
+            0.5 * 769.,
+            0.5 * 585.,
+            0.5 * 1140.,
+            0.5 * 678.,
+            0.5 * 1149.,
+            0.5 * 719.,
+            0.5 * 1166.,
+        ];
+
+        assert_eq!(result, expected);
+    }
 
     #[test]
     fn test_rotation_calculator() {
