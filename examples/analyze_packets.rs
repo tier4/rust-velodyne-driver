@@ -11,8 +11,8 @@ use csv::Writer;
 
 use velodyne_driver;
 use velodyne_driver::{
-    calc_angles, calc_points, make_vert_tables, Data, DistanceCalculator, Point, PointProcessor,
-    RawData, RotationCalculator, SinCosTables, VLP16Config,
+    calc_points, make_vert_tables, rotation_calculator_new, Data, Point, PointProcessor, RawData,
+    VLP16Config,
 };
 
 struct CSVWriter {
@@ -40,13 +40,17 @@ fn make_socket() -> Result<UdpSocket, std::io::Error> {
     UdpSocket::bind(socket_addr)
 }
 
+fn extract_distances(sequence: &[Data], resolution: f64) -> Vec<f64> {
+    sequence
+        .iter()
+        .map(|s: &Data| (s.distance as f64) * resolution)
+        .collect::<Vec<f64>>()
+}
+
 fn main() -> Result<(), std::io::Error> {
     let f = std::fs::File::open("VLP16db.yaml")?;
     let config: VLP16Config = serde_yaml::from_reader(f).unwrap();
 
-    let distance_calculator = DistanceCalculator {
-        resolution: config.distance_resolution,
-    };
     let tables = make_vert_tables(&config.lasers);
 
     let socket = make_socket()?;
@@ -58,21 +62,11 @@ fn main() -> Result<(), std::io::Error> {
 
         let data: RawData = deserialize(&buf).unwrap();
         for (block_index, block) in data.blocks.iter().enumerate() {
-            let (radian0, radian1) = calc_angles(&data.blocks, block_index);
-            let r = RotationCalculator { radian0, radian1 };
+            let r = rotation_calculator_new(&data.blocks, block_index);
             let rotations0 = r.get(0);
             let rotations1 = r.get(1);
-            let calc_distance = |s: &Data| (s.distance as f64) * config.distance_resolution;
-            let distances0 = block
-                .sequence0
-                .iter()
-                .map(calc_distance)
-                .collect::<Vec<f64>>();
-            let distances1 = block
-                .sequence1
-                .iter()
-                .map(calc_distance)
-                .collect::<Vec<f64>>();
+            let distances0 = extract_distances(&block.sequence0, config.distance_resolution);
+            let distances1 = extract_distances(&block.sequence1, config.distance_resolution);
 
             calc_points(&mut writer, &tables, &distances0, &rotations0);
             calc_points(&mut writer, &tables, &distances1, &rotations1);

@@ -113,20 +113,6 @@ impl SinCosTables {
     }
 }
 
-pub struct DistanceCalculator {
-    pub resolution: f64,
-}
-
-impl DistanceCalculator {
-    fn calculate(&self, distance: u16) -> f64 {
-        (distance as f64) * self.resolution
-    }
-}
-
-fn polar_to_cartesian(distance: f64, radian: f64) -> (f64, f64) {
-    (distance * f64::cos(radian), distance * f64::sin(radian))
-}
-
 pub fn calc_points<T: PointProcessor>(
     point_processor: &mut T,
     sin_cos_table: &SinCosTables,
@@ -176,14 +162,14 @@ fn calc_degree_diff(blocks: &[DataBlock], index: usize) -> f64 {
     }
 }
 
-pub fn calc_angles(blocks: &[DataBlock], index: usize) -> (f64, f64) {
+pub fn rotation_calculator_new(blocks: &[DataBlock], index: usize) -> RotationCalculator {
     let degree_diff = calc_degree_diff(blocks, index);
     let degree0 = AZIMUTH_TO_DEGREE * (blocks[index].azimuth as f64);
     let degree1 = degree0 + degree_diff;
 
     let radian0 = degree_to_radian(degree0);
     let radian1 = degree_to_radian(degree1);
-    (radian0, radian1)
+    RotationCalculator { radian0, radian1 }
 }
 
 #[cfg(test)]
@@ -212,9 +198,7 @@ mod tests {
         {
             let block_index = 0;
             let channel = 4;
-            let (radian0, radian1) = calc_angles(&data.blocks, block_index);
-
-            let r = RotationCalculator { radian0, radian1 };
+            let r = rotation_calculator_new(&data.blocks, block_index);
 
             let firinig_time = FIRING_INTERVAL * (channel as f64);
             let t: f64 = 35695. * AZIMUTH_TO_DEGREE;
@@ -230,9 +214,7 @@ mod tests {
         {
             let block_index = 7;
             let channel = 8;
-            let (radian0, radian1) = calc_angles(&data.blocks, block_index);
-
-            let r = RotationCalculator { radian0, radian1 };
+            let r = rotation_calculator_new(&data.blocks, block_index);
 
             let firinig_time = FIRING_INTERVAL * (channel as f64);
             let t: f64 = 35971. * AZIMUTH_TO_DEGREE;
@@ -248,9 +230,7 @@ mod tests {
         {
             let block_index = 11;
             let channel = 5;
-            let (radian0, radian1) = calc_angles(&data.blocks, block_index);
-
-            let r = RotationCalculator { radian0, radian1 };
+            let r = rotation_calculator_new(&data.blocks, block_index);
 
             let firinig_time = FIRING_INTERVAL * (channel as f64);
             let t: f64 = 129. * AZIMUTH_TO_DEGREE;
@@ -297,8 +277,6 @@ mod tests {
         let f = std::fs::File::open("VLP16db.yaml")?;
         let config: VLP16Config = serde_yaml::from_reader(f)?;
 
-        let data: RawData = deserialize(&SAMPLE_PACKET).unwrap();
-
         let sin_cos_table = make_vert_tables(&config.lasers);
 
         let mut point_accumulator = PointAccumulator::new();
@@ -339,41 +317,5 @@ mod tests {
         }
 
         Ok(())
-    }
-
-    #[test]
-    fn test_calc_angles() {
-        let data: RawData = deserialize(&SAMPLE_PACKET).unwrap();
-
-        // blocks[ 0].azimuth = 35695
-        // blocks[ 1].azimuth = 35733
-        // blocks[ 2].azimuth = 35773
-        // blocks[ 3].azimuth = 35813
-        // blocks[ 4].azimuth = 35853
-        // blocks[ 5].azimuth = 35891
-        // blocks[ 6].azimuth = 35931
-        // blocks[ 7].azimuth = 35971
-        // blocks[ 8].azimuth = 11
-        // blocks[ 9].azimuth = 49
-        // blocks[10].azimuth = 90
-        // blocks[11].azimuth = 129
-
-        let (rotation0, rotation1) = calc_angles(&data.blocks, 0);
-        let expected0 = PI * 0.01 * 35695. / 180.;
-        let expected1 = PI * 0.01 * 35733. / 180.0;
-        assert!(f64::abs(rotation0 - expected0) < 1e-10);
-        assert!(f64::abs(rotation1 - expected1) < 1e-10);
-
-        let (rotation0, rotation1) = calc_angles(&data.blocks, 7);
-        let expected0 = PI * 0.01 * 35971. / 180.;
-        let expected1 = PI * 0.01 * (35971. + 11. + (36000. - 35971.)) / 180.0;
-        assert!(f64::abs(rotation0 - expected0) < 1e-10);
-        assert!(f64::abs(rotation1 - expected1) < 1e-10);
-
-        let (rotation0, rotation1) = calc_angles(&data.blocks, 11);
-        let expected0 = PI * 0.01 * 129. / 180.;
-        let expected1 = PI * 0.01 * (129. + (129. - 90.)) / 180.0;
-        assert!(f64::abs(rotation0 - expected0) < 1e-10);
-        assert!(f64::abs(rotation1 - expected1) < 1e-10);
     }
 }
