@@ -42,10 +42,10 @@ fn main() -> Result<(), std::io::Error> {
     let calculator = PointCloudCalculator::new(&config);
 
     let socket = make_socket()?;
-    for i in 0..75 {
-        let mut writer = CSVWriter::from_path(format!("points/points{:03}.csv", i)).unwrap();
+    let mut buf = [0u8; 1206];
 
-        let mut buf = [0u8; 1206];
+    let mut writer = CSVWriter::from_path("points/points.csv").unwrap();
+    for _ in 0..75 {
         socket.recv_from(&mut buf)?;
 
         calculator.calculate(&mut writer, &buf);
