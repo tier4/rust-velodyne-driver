@@ -10,6 +10,11 @@ use bincode::deserialize;
 
 const AZIMUTH_TO_DEGREE: f64 = 0.01;
 const PI: f64 = std::f64::consts::PI;
+pub const CHANNELS_PER_SEQUENCE: usize = 16;
+pub const N_BLOCKS: usize = 12;
+pub const N_SEQUENCES_PER_BLOCK: usize = 2;
+pub const N_SEQUENCES: usize = N_BLOCKS * N_SEQUENCES_PER_BLOCK;
+pub const VLP16_PACKET_DATA_SIZE: usize = 1206;
 
 #[derive(Deserialize)]
 pub struct Data {
@@ -29,7 +34,7 @@ pub struct DataBlock {
 
 #[derive(Deserialize)]
 pub struct RawData {
-    pub blocks: [DataBlock; 12],
+    pub blocks: [DataBlock; N_BLOCKS],
     pub timestamp: [u8; 4],
     pub factory_bytes: [u8; 2],
 }
@@ -58,7 +63,7 @@ pub struct VLP16Config {
 pub type Point = (f64, f64, f64);
 
 pub trait PointProcessor {
-    fn process(&mut self, channel: usize, point: &Point);
+    fn process(&mut self, sequence_index: usize, channel: usize, point: &Point);
 }
 
 pub struct SinCosTables {
@@ -81,7 +86,6 @@ pub struct RotationCalculator {
     pub radian1: f64,
 }
 
-const CHANNELS_PER_SEQUENCE: usize = 16;
 const FIRING_INTERVAL: f64 = 2.304; // [micro second]
 const OFFSET_TIME: f64 = 55.296; // [micro second]
 impl RotationCalculator {
@@ -114,9 +118,11 @@ impl SinCosTables {
     }
 }
 
+// TODO Support the Dual Return mode
 pub fn calc_points<T: PointProcessor>(
     point_processor: &mut T,
     sin_cos_table: &SinCosTables,
+    sequence_index: usize,
     distances: &[f64],
     rotations: &[f64],
 ) {
@@ -128,7 +134,7 @@ pub fn calc_points<T: PointProcessor>(
         let (z, xy_distance) = sin_cos_table.project(channel, *distance);
         let x = xy_distance * f64::sin(*radian);
         let y = xy_distance * f64::cos(*radian);
-        point_processor.process(channel, &(x, y, z));
+        point_processor.process(sequence_index, channel, &(x, y, z));
     }
 }
 
@@ -211,8 +217,22 @@ impl PointCloudCalculator {
             let distances0 = self.distance.calculate(&block.sequence0);
             let distances1 = self.distance.calculate(&block.sequence1);
 
-            calc_points(point_processor, &self.tables, &distances0, &rotations0);
-            calc_points(point_processor, &self.tables, &distances1, &rotations1);
+            let sequence_index0 = block_index * N_SEQUENCES_PER_BLOCK + 0;
+            let sequence_index1 = block_index * N_SEQUENCES_PER_BLOCK + 1;
+            calc_points(
+                point_processor,
+                &self.tables,
+                sequence_index0,
+                &distances0,
+                &rotations0,
+            );
+            calc_points(
+                point_processor,
+                &self.tables,
+                sequence_index1,
+                &distances1,
+                &rotations1,
+            );
         }
     }
 }
@@ -356,7 +376,7 @@ mod tests {
     }
 
     impl PointProcessor for PointAccumulator {
-        fn process(&mut self, channel: usize, p: &Point) {
+        fn process(&mut self, _: usize, channel: usize, p: &Point) {
             self.points[channel] = Some(*p);
         }
     }
@@ -370,19 +390,22 @@ mod tests {
 
         let mut point_accumulator = PointAccumulator::new();
 
+        let sequence_index = 0;
+
         let rotations = [
             0.10, 0.32, 0.54, 0.76, 0.98, 1.20, 1.42, 1.64, 1.86, 2.08, 2.30, 2.52, 2.74, 2.96,
             3.18, 3.40,
         ];
 
         let distances = [
-            0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.0, // distance 0.0 will be skipped
-            1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7,
+            // Element which its distance = 0.0 will be skipped.
+            0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.0, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7,
         ];
 
         calc_points(
             &mut point_accumulator,
             &sin_cos_table,
+            sequence_index,
             &distances,
             &rotations,
         );
