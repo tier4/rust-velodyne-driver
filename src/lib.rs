@@ -138,13 +138,6 @@ pub fn calc_points<T: PointProcessor>(
     }
 }
 
-fn make_rot_tables(lasers: &[LaserConfig]) -> SinCosTables {
-    let iter = lasers
-        .iter()
-        .map(|laser| (laser.laser_id, laser.rot_correction));
-    make_sin_cos_tables(iter)
-}
-
 pub fn make_vert_tables(lasers: &[LaserConfig]) -> SinCosTables {
     let iter = lasers
         .iter()
@@ -357,8 +350,19 @@ mod tests {
     fn test_read_vlp16_yaml() -> Result<(), Box<dyn std::error::Error>> {
         let f = std::fs::File::open("VLP16db.yaml")?;
         let config: VLP16Config = serde_yaml::from_reader(f)?;
-        make_vert_tables(&config.lasers);
-        make_rot_tables(&config.lasers);
+        let table = make_vert_tables(&config.lasers);
+
+        let (sin0, cos0) = table.get(0);
+        assert!(f64::abs(sin0 - f64::sin(-0.2617993877991494)) < 1e-6);
+        assert!(f64::abs(cos0 - f64::cos(-0.2617993877991494)) < 1e-6);
+
+        let (sin9, cos9) = table.get(9);
+        assert!(f64::abs(sin9 - f64::sin(0.15707963267948966)) < 1e-6);
+        assert!(f64::abs(cos9 - f64::cos(0.15707963267948966)) < 1e-6);
+
+        let (sin15, cos15) = table.get(15);
+        assert!(f64::abs(sin15 - f64::sin(0.2617993877991494)) < 1e-6);
+        assert!(f64::abs(cos15 - f64::cos(0.2617993877991494)) < 1e-6);
 
         Ok(())
     }
