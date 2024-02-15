@@ -201,7 +201,11 @@ impl PointCloudCalculator {
         PointCloudCalculator { distance, tables }
     }
 
-    pub fn calculate<T: PointProcessor>(&self, point_processor: &mut T, bytes: &[u8; 1206]) {
+    pub fn calculate<T: PointProcessor>(
+        &self,
+        point_processor: &mut T,
+        bytes: &[u8; VLP16_PACKET_DATA_SIZE],
+    ) {
         let data: RawData = deserialize(bytes).unwrap();
         for (block_index, block) in data.blocks.iter().enumerate() {
             let r = rotation_calculator_new(&data.blocks, block_index);
