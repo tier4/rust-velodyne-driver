@@ -47,13 +47,13 @@ impl PointProcessor for Scan {
 }
 
 impl HDF5Writer {
-    fn write(&self, dataset_name: &str, points: Array3<f64>) -> hdf5::Result<()> {
+    fn write(&self, dataset_name: &str, points: &Array3<f64>) -> hdf5::Result<()> {
         #[cfg(feature = "blosc")]
         blosc_set_nthreads(2);
         let builder = self.file.new_dataset_builder();
         #[cfg(feature = "blosc")]
-        let builder = builder.blosc_zstd(COMPRESSION_LEVEL, true); // zstd + shuffle
-        builder.with_data(&points).create(dataset_name)?;
+        let builder = builder.blosc_zstd(COMPRESSION_LEVEL, true);
+        builder.with_data(points).create(dataset_name)?;
         Ok(())
     }
 }
@@ -81,7 +81,7 @@ fn main() -> Result<(), std::io::Error> {
 
         let mut scan = Scan::default();
         calculator.calculate(&mut scan, &buf);
-        writer.write(&scan_name, scan.points).unwrap();
+        writer.write(&scan_name, &scan.points).unwrap();
     }
 
     Ok(())
