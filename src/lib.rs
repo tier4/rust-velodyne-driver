@@ -1,15 +1,26 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+#![feature(error_in_core)]
+
+extern crate alloc;
+
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use core::cmp::min;
-use std::collections::HashMap;
 
-use serde::Deserialize;
-
+mod config;
 mod sample_packet;
 
+pub use crate::config::VLP16Config;
 pub use crate::sample_packet::SAMPLE_PACKET;
 use bincode::deserialize;
+use core::f64::consts::PI;
+use serde::Deserialize;
+
+pub use crate::config::parse_config;
+use crate::config::LaserConfig;
 
 const AZIMUTH_TO_DEGREE: f64 = 0.01;
-const PI: f64 = std::f64::consts::PI;
 pub const CHANNELS_PER_SEQUENCE: usize = 16;
 pub const N_BLOCKS: usize = 12;
 pub const N_SEQUENCES_PER_BLOCK: usize = 2;
@@ -39,27 +50,6 @@ pub struct RawData {
     pub factory_bytes: [u8; 2],
 }
 
-#[derive(Deserialize)]
-pub struct LaserConfig {
-    pub dist_correction: f64,
-    pub dist_correction_x: f64,
-    pub dist_correction_y: f64,
-    pub focal_distance: f64,
-    pub focal_slope: f64,
-    pub horiz_offset_correction: f64,
-    pub laser_id: usize,
-    pub rot_correction: f64,
-    pub vert_correction: f64,
-    pub vert_offset_correction: f64,
-}
-
-#[derive(Deserialize)]
-pub struct VLP16Config {
-    pub lasers: [LaserConfig; 16],
-    pub num_lasers: usize,
-    pub distance_resolution: f64,
-}
-
 pub type Point = (f64, f64, f64);
 
 pub trait PointProcessor {
@@ -67,23 +57,23 @@ pub trait PointProcessor {
 }
 
 pub struct SinCosTables {
-    pub sin: HashMap<usize, f64>,
-    pub cos: HashMap<usize, f64>,
-}
-
-fn make_sin_cos_tables(iter: impl Iterator<Item = (usize, f64)>) -> SinCosTables {
-    let mut sin = HashMap::new();
-    let mut cos = HashMap::new();
-    for (id, angle) in iter {
-        sin.insert(id, f64::sin(angle));
-        cos.insert(id, f64::cos(angle));
-    }
-    SinCosTables { sin, cos }
+    pub sin: BTreeMap<usize, f64>,
+    pub cos: BTreeMap<usize, f64>,
 }
 
 pub struct RotationCalculator {
     pub radian0: f64,
     pub radian1: f64,
+}
+
+fn make_sin_cos_tables(iter: impl Iterator<Item = (usize, f64)>) -> SinCosTables {
+    let mut sin = BTreeMap::new();
+    let mut cos = BTreeMap::new();
+    for (id, angle) in iter {
+        sin.insert(id, f64::sin(angle));
+        cos.insert(id, f64::cos(angle));
+    }
+    SinCosTables { sin, cos }
 }
 
 const FIRING_INTERVAL: f64 = 2.304; // [micro second]
@@ -138,7 +128,7 @@ pub fn calc_points<T: PointProcessor>(
     }
 }
 
-pub fn make_vert_tables(lasers: &[LaserConfig]) -> SinCosTables {
+fn make_vert_tables(lasers: &[LaserConfig]) -> SinCosTables {
     let iter = lasers
         .iter()
         .map(|laser| (laser.laser_id, laser.vert_correction));
@@ -237,7 +227,6 @@ impl PointCloudCalculator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sample_packet::SAMPLE_PACKET;
 
     #[test]
     fn test_distance_calculator() {
@@ -351,9 +340,9 @@ mod tests {
     }
 
     #[test]
-    fn test_read_vlp16_yaml() -> Result<(), Box<dyn std::error::Error>> {
-        let f = std::fs::File::open("VLP16db.yaml")?;
-        let config: VLP16Config = serde_yaml::from_reader(f)?;
+    fn test_read_vlp16_yaml() -> Result<(), Box<dyn core::error::Error>> {
+        let config_str = include_str!("../VLP16db.yaml");
+        let config = parse_config(config_str)?;
         let table = make_vert_tables(&config.lasers);
 
         let (sin0, cos0) = table.get(0);
@@ -390,9 +379,9 @@ mod tests {
     }
 
     #[test]
-    fn test_calc_points() -> Result<(), Box<dyn std::error::Error>> {
-        let f = std::fs::File::open("VLP16db.yaml")?;
-        let config: VLP16Config = serde_yaml::from_reader(f)?;
+    fn test_calc_points() -> Result<(), Box<dyn core::error::Error>> {
+        let config_str = include_str!("../VLP16db.yaml");
+        let config = parse_config(config_str)?;
 
         let sin_cos_table = make_vert_tables(&config.lasers);
 

@@ -5,10 +5,14 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["std"]
+std = []
+
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
-bincode = "1.3.3"
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+yaml-peg = { default-features = false, path = "./yaml-peg-rs" }
+bincode = { version = "1.3.3", default-features = false }
 
 [dev-dependencies]
 csv = "1.3.0"

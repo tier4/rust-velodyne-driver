@@ -1,11 +1,13 @@
+#![feature(error_in_core)]
+
 use core::convert::AsRef;
+use core::error::Error;
 use core::net::IpAddr;
 use core::net::Ipv4Addr;
 use core::net::SocketAddr;
 use std::net::UdpSocket;
 use std::path::Path;
 
-use hdf5;
 use ndarray::{Array, Array3};
 use velodyne_driver::{
     Point, PointCloudCalculator, PointProcessor, VLP16Config, CHANNELS_PER_SEQUENCE, N_SEQUENCES,
@@ -64,9 +66,9 @@ fn make_socket() -> Result<UdpSocket, std::io::Error> {
     UdpSocket::bind(socket_addr)
 }
 
-fn main() -> Result<(), std::io::Error> {
-    let f = std::fs::File::open("VLP16db.yaml")?;
-    let config: VLP16Config = serde_yaml::from_reader(f).unwrap();
+fn main() -> Result<(), Box<dyn Error>> {
+    let vlp16_config_str = include_str!("../VLP16db.yaml");
+    let config = velodyne_driver::parse_config(vlp16_config_str)?;
     let calculator = PointCloudCalculator::new(&config);
 
     let socket = make_socket()?;
@@ -74,7 +76,7 @@ fn main() -> Result<(), std::io::Error> {
 
     let writer = HDF5Writer::from_path("points/points.hdf5").unwrap();
 
-    for i in 0..(75 * 300) {
+    for i in 0..(75 * 20) {
         socket.recv_from(&mut buf)?;
         let scan_name = format!("{:08}", i);
         println!("scan_name = {scan_name}");
