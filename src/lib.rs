@@ -3,7 +3,6 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::cmp::min;
@@ -227,6 +226,7 @@ impl PointCloudCalculator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::boxed::Box;
 
     #[test]
     fn test_distance_calculator() {

@@ -1,6 +1,5 @@
 #![feature(error_in_core)]
 
-use core::convert::AsRef;
 use core::error::Error;
 use core::net::IpAddr;
 use core::net::Ipv4Addr;
@@ -10,7 +9,7 @@ use std::path::Path;
 
 use ndarray::{Array, Array3};
 use velodyne_driver::{
-    Point, PointCloudCalculator, PointProcessor, VLP16Config, CHANNELS_PER_SEQUENCE, N_SEQUENCES,
+    Point, PointCloudCalculator, PointProcessor, CHANNELS_PER_SEQUENCE, N_SEQUENCES,
     VLP16_PACKET_DATA_SIZE,
 };
 
