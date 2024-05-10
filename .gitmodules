@@ -1,0 +1,3 @@
+[submodule "yaml-peg-rs"]
+	path = yaml-peg-rs
+	url = https://github.com/IshitaTakeshi/yaml-peg-rs.git
