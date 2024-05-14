@@ -4,6 +4,7 @@ use core::error::Error;
 use core::net::IpAddr;
 use core::net::Ipv4Addr;
 use core::net::SocketAddr;
+
 use std::net::UdpSocket;
 use std::path::Path;
 
@@ -13,6 +14,7 @@ use velodyne_driver::{
     VLP16_PACKET_DATA_SIZE,
 };
 
+#[cfg(feature = "blosc")]
 const COMPRESSION_LEVEL: u8 = 9;
 
 struct HDF5Writer {
@@ -52,8 +54,10 @@ impl HDF5Writer {
         #[cfg(feature = "blosc")]
         blosc_set_nthreads(2);
         let builder = self.file.new_dataset_builder();
+
         #[cfg(feature = "blosc")]
         let builder = builder.blosc_zstd(COMPRESSION_LEVEL, true);
+
         builder.with_data(points).create(dataset_name)?;
         Ok(())
     }
@@ -73,7 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let socket = make_socket()?;
     let mut buf = [0u8; VLP16_PACKET_DATA_SIZE];
 
-    let writer = HDF5Writer::from_path("points/points.hdf5").unwrap();
+    let writer = HDF5Writer::from_path("examples/points/points.hdf5").unwrap();
 
     for i in 0..(75 * 20) {
         socket.recv_from(&mut buf)?;

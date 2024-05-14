@@ -12,9 +12,13 @@ mod sample_packet;
 
 pub use crate::config::VLP16Config;
 pub use crate::sample_packet::SAMPLE_PACKET;
-use bincode::deserialize;
 use core::f64::consts::PI;
-use serde::Deserialize;
+
+// necessary for f64::sin and f64::cos in no-std
+#[allow(unused_imports)]
+use num_traits::real::Real;
+
+use zerocopy::{FromZeroes, FromBytes};
 
 pub use crate::config::parse_config;
 use crate::config::LaserConfig;
@@ -26,23 +30,25 @@ pub const N_SEQUENCES_PER_BLOCK: usize = 2;
 pub const N_SEQUENCES: usize = N_BLOCKS * N_SEQUENCES_PER_BLOCK;
 pub const VLP16_PACKET_DATA_SIZE: usize = 1206;
 
-#[derive(Deserialize)]
+
+#[derive(FromZeroes, FromBytes)]
+#[repr(C, packed)]
 pub struct Data {
     pub distance: u16,
     pub intensity: u8,
 }
 
-type ChannelData = [Data; 16];
-
-#[derive(Deserialize)]
+#[derive(FromZeroes, FromBytes)]
+#[repr(C, packed)]
 pub struct DataBlock {
     pub header: u16,
     pub azimuth: u16,
-    pub sequence0: ChannelData,
-    pub sequence1: ChannelData,
+    pub sequence0: [Data; 16],
+    pub sequence1: [Data; 16],
 }
 
-#[derive(Deserialize)]
+#[derive(FromZeroes, FromBytes)]
+#[repr(C, packed)]
 pub struct RawData {
     pub blocks: [DataBlock; N_BLOCKS],
     pub timestamp: [u8; 4],
@@ -195,7 +201,7 @@ impl PointCloudCalculator {
         point_processor: &mut T,
         bytes: &[u8; VLP16_PACKET_DATA_SIZE],
     ) {
-        let data: RawData = deserialize(bytes).unwrap();
+        let data = RawData::ref_from(bytes).unwrap();
         for (block_index, block) in data.blocks.iter().enumerate() {
             let r = rotation_calculator_new(&data.blocks, block_index);
             let rotations0 = r.get(0);
@@ -230,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_distance_calculator() {
-        let data: RawData = deserialize(&SAMPLE_PACKET).unwrap();
+        let data = RawData::ref_from(&SAMPLE_PACKET).unwrap();
 
         // sequence[ 0].distance = 393
         // sequence[ 1].distance = 699
@@ -275,7 +281,7 @@ mod tests {
 
     #[test]
     fn test_rotation_calculator() {
-        let data: RawData = deserialize(&SAMPLE_PACKET).unwrap();
+        let data = RawData::ref_from(&SAMPLE_PACKET).unwrap();
 
         // blocks[ 0].azimuth = 35695
         // blocks[ 1].azimuth = 35733
