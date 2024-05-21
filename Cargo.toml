@@ -9,7 +9,7 @@ std = []
 
 [dependencies]
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
-yaml-peg = { default-features = false, path = "./yaml-peg-rs" }
+yaml-peg = { version = "1.0.8", default-features = false }
 zerocopy = { version = "0.7.34", features = ["derive"] }
 num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 
