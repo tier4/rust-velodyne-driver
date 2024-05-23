@@ -57,6 +57,45 @@ pub struct RawData {
 
 pub type Point = (f64, f64, f64);
 
+/// Trait to receive scan points.
+///
+/// * `sequence_index` - Sequence in one packet. VLP-16 has 12 data blocks in
+/// one packet and each data block has two sequences. Therefore one scan packet has 24 sequences
+/// in total and `sequence_index` can be 0~23.
+/// * `channel` - LiDAR scan channel per sequence. VLP-16 has 16 channels so
+/// `channel` can be 0~15.
+/// It is recommended to know the packet structure before using this trait.
+/// See `Application Note VLP-16: Packet Structure & Timing Definition` for details.
+/// # Examples
+///
+/// ```
+/// use ndarray::{Array, Array3};
+/// use velodyne_driver::{
+///     Point, PointProcessor, CHANNELS_PER_SEQUENCE, N_SEQUENCES,
+/// };
+///
+/// struct Scan {
+///     pub points: Array3<f64>,
+/// }
+///
+/// impl Default for Scan {
+///     fn default() -> Self {
+///         Scan {
+///             points: Array::zeros((N_SEQUENCES, CHANNELS_PER_SEQUENCE, 3)),
+///         }
+///     }
+/// }
+///
+/// impl PointProcessor for Scan {
+///     fn process(&mut self, sequence_index: usize, channel: usize, point: &Point) {
+///         let (x, y, z) = point;
+///         self.points[[sequence_index, channel, 0]] = *x;
+///         self.points[[sequence_index, channel, 1]] = *y;
+///         self.points[[sequence_index, channel, 2]] = *z;
+///     }
+/// }
+/// ```
+
 pub trait PointProcessor {
     fn process(&mut self, sequence_index: usize, channel: usize, point: &Point);
 }
@@ -190,12 +229,16 @@ pub struct PointCloudCalculator {
 }
 
 impl PointCloudCalculator {
+    /// Constructs a struct instance from the Velodyne config file.
     pub fn new(config: &VLP16Config) -> Self {
         let distance = DistanceCalculator::new(config.distance_resolution);
         let tables = make_vert_tables(&config.lasers);
         PointCloudCalculator { distance, tables }
     }
 
+    /// Calculate point cloud from a packet.
+    /// * `point_processor` - A struct instance to process received points.
+    /// * `bytes` - Received packet bytes.
     pub fn calculate<T: PointProcessor>(
         &self,
         point_processor: &mut T,
