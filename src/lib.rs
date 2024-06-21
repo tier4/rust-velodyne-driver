@@ -18,7 +18,7 @@ use core::f64::consts::PI;
 #[allow(unused_imports)]
 use num_traits::real::Real;
 
-use zerocopy::{FromZeroes, FromBytes};
+use zerocopy::{FromBytes, FromZeroes};
 
 pub use crate::config::parse_config;
 use crate::config::LaserConfig;
@@ -29,7 +29,6 @@ pub const N_BLOCKS: usize = 12;
 pub const N_SEQUENCES_PER_BLOCK: usize = 2;
 pub const N_SEQUENCES: usize = N_BLOCKS * N_SEQUENCES_PER_BLOCK;
 pub const VLP16_PACKET_DATA_SIZE: usize = 1206;
-
 
 #[derive(FromZeroes, FromBytes)]
 #[repr(C, packed)]
@@ -101,8 +100,8 @@ pub trait PointProcessor {
 }
 
 pub struct SinCosTables {
-    pub sin: BTreeMap<usize, f64>,
-    pub cos: BTreeMap<usize, f64>,
+    pub sin: [f64; 16],
+    pub cos: [f64; 16],
 }
 
 pub struct RotationCalculator {
@@ -111,11 +110,11 @@ pub struct RotationCalculator {
 }
 
 fn make_sin_cos_tables(iter: impl Iterator<Item = (usize, f64)>) -> SinCosTables {
-    let mut sin = BTreeMap::new();
-    let mut cos = BTreeMap::new();
+    let mut sin: [f64; 16] = Default::default();
+    let mut cos: [f64; 16] = Default::default();
     for (id, angle) in iter {
-        sin.insert(id, f64::sin(angle));
-        cos.insert(id, f64::cos(angle));
+        sin[id] = f64::sin(angle);
+        cos[id] = f64::cos(angle);
     }
     SinCosTables { sin, cos }
 }
@@ -141,8 +140,8 @@ impl RotationCalculator {
 
 impl SinCosTables {
     fn get(&self, channel: usize) -> (f64, f64) {
-        let sin = *(self.sin).get(&channel).unwrap();
-        let cos = *(self.cos).get(&channel).unwrap();
+        let sin = self.sin[channel];
+        let cos = self.cos[channel];
         (sin, cos)
     }
 
@@ -173,9 +172,10 @@ pub fn calc_points<T: PointProcessor>(
 }
 
 fn make_vert_tables(lasers: &[LaserConfig]) -> SinCosTables {
-    let iter = lasers
-        .iter()
-        .map(|laser| (laser.laser_id, laser.vert_correction));
+    let iter = lasers.iter().map(|laser| {
+        assert!(laser.laser_id < 16);
+        (laser.laser_id, laser.vert_correction)
+    });
     make_sin_cos_tables(iter)
 }
 
