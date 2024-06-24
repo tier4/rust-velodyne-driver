@@ -3,7 +3,6 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::cmp::min;
 
@@ -94,7 +93,6 @@ pub type Point = (f64, f64, f64);
 ///     }
 /// }
 /// ```
-
 pub trait PointProcessor {
     fn process(&mut self, sequence_index: usize, channel: usize, point: &Point);
 }
@@ -160,13 +158,13 @@ pub fn calc_points<T: PointProcessor>(
     rotations: &[f64],
 ) {
     assert_eq!(distances.len(), rotations.len());
-    for (channel, (distance, radian)) in distances.iter().zip(rotations.iter()).enumerate() {
-        if *distance == 0. {
+    for (channel, (&distance, &radian)) in distances.iter().zip(rotations.iter()).enumerate() {
+        if distance == 0. {
             continue;
         }
-        let (z, xy_distance) = sin_cos_table.project(channel, *distance);
-        let x = xy_distance * f64::sin(*radian);
-        let y = xy_distance * f64::cos(*radian);
+        let (z, xy_distance) = sin_cos_table.project(channel, distance);
+        let x = xy_distance * f64::sin(radian);
+        let y = xy_distance * f64::cos(radian);
         point_processor.process(sequence_index, channel, &(x, y, z));
     }
 }
